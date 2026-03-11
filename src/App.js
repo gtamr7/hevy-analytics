@@ -1,11 +1,14 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, RadarChart, Radar, PolarGrid, PolarAngleAxis } from "recharts";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
+const KG_TO_LBS = 2.20462;
+
 const MUSCLE_MAP = {
   "barbell bench press": "Chest", "dumbbell bench press": "Chest", "incline bench press": "Chest",
   "cable fly": "Chest", "chest fly": "Chest", "push up": "Chest", "pushup": "Chest",
+  "bench press": "Chest",
   "squat": "Quads", "leg press": "Quads", "hack squat": "Quads", "leg extension": "Quads",
   "romanian deadlift": "Hamstrings", "leg curl": "Hamstrings", "deadlift": "Hamstrings",
   "barbell row": "Back", "cable row": "Back", "lat pulldown": "Back", "pull up": "Back",
@@ -13,7 +16,8 @@ const MUSCLE_MAP = {
   "overhead press": "Shoulders", "shoulder press": "Shoulders", "lateral raise": "Shoulders",
   "front raise": "Shoulders", "face pull": "Shoulders",
   "barbell curl": "Biceps", "dumbbell curl": "Biceps", "hammer curl": "Biceps", "cable curl": "Biceps",
-  "tricep": "Triceps", "skull crusher": "Triceps", "close grip bench": "Triceps", "dip": "Triceps",
+  "tricep": "Triceps", "triceps": "Triceps", "skull crusher": "Triceps", "close grip bench": "Triceps", "dip": "Triceps",
+  "pushdown": "Triceps",
   "calf raise": "Calves", "standing calf": "Calves",
   "plank": "Core", "crunch": "Core", "ab": "Core", "sit up": "Core",
   "glute": "Glutes", "hip thrust": "Glutes",
@@ -27,25 +31,41 @@ function getMuscle(name) {
   return "Other";
 }
 
-function parseCSV(text) {
-  const lines = text.trim().split("\n");
-  const headers = lines[0].split(",").map(h => h.trim().replace(/"/g, ""));
-  return lines.slice(1).map(line => {
-    const vals = line.match(/(".*?"|[^,]+|(?<=,)(?=,)|(?<=,)$|^(?=,))/g) || [];
-    const obj = {};
-    headers.forEach((h, i) => { obj[h] = (vals[i] || "").replace(/"/g, "").trim(); });
-    return obj;
-  }).filter(r => r["Exercise Name"] || r["exercise_title"] || r["title"]);
+async function fetchAllWorkouts(apiKey) {
+  const all = [];
+  let page = 1;
+  let pageCount = 1;
+  while (page <= pageCount) {
+    const res = await fetch(`https://api.hevyapp.com/v1/workouts?page=${page}&pageSize=10`, {
+      headers: { "api-key": apiKey }
+    });
+    if (!res.ok) throw new Error(res.status === 401 ? "Invalid API key" : "Failed to fetch workouts");
+    const data = await res.json();
+    pageCount = data.page_count;
+    all.push(...data.workouts);
+    page++;
+  }
+  return all;
 }
 
-function normalizeRows(rows) {
-  return rows.map(r => ({
-    date: r["Start Time"] || r["start_time"] || r["date"] || "",
-    exercise: r["Exercise Name"] || r["exercise_title"] || r["title"] || "",
-    sets: parseInt(r["Sets"] || r["sets"] || "1"),
-    reps: parseInt(r["Reps"] || r["reps"] || "0"),
-    weight: parseFloat(r["Weight"] || r["weight_lbs"] || r["weight"] || "0"),
-  })).filter(r => r.exercise && r.date);
+function workoutsToRows(workouts) {
+  const rows = [];
+  workouts.forEach(workout => {
+    workout.exercises.forEach(exercise => {
+      exercise.sets.forEach(set => {
+        if (set.type === "warmup") return;
+        if (!set.reps || !set.weight_kg) return;
+        rows.push({
+          date: workout.start_time,
+          exercise: exercise.title,
+          sets: 1,
+          reps: set.reps,
+          weight: set.weight_kg * KG_TO_LBS,
+        });
+      });
+    });
+  });
+  return rows;
 }
 
 function groupByExercise(rows) {
@@ -116,16 +136,9 @@ function getMuscleFatigue(rows) {
 // ── components ────────────────────────────────────────────────────────────────
 
 const COLORS = {
-  bg: "#0a0a0f",
-  surface: "#12121a",
-  card: "#1a1a26",
-  border: "#2a2a3d",
-  accent: "#6ee7b7",
-  accent2: "#818cf8",
-  accent3: "#f472b6",
-  warn: "#fb923c",
-  text: "#e2e8f0",
-  muted: "#64748b",
+  bg: "#0a0a0f", surface: "#12121a", card: "#1a1a26", border: "#2a2a3d",
+  accent: "#6ee7b7", accent2: "#818cf8", accent3: "#f472b6",
+  warn: "#fb923c", text: "#e2e8f0", muted: "#64748b",
 };
 
 const TAG = ({ color, children }) => (
@@ -141,6 +154,15 @@ const Card = ({ children, style = {} }) => (
     borderRadius: 12, padding: 20, ...style
   }}>{children}</div>
 );
+
+function Spinner() {
+  return (
+    <svg width={18} height={18} viewBox="0 0 24 24" style={{ animation: "spin 0.8s linear infinite", display: "block" }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" fill="none" strokeDasharray="31.4" strokeDashoffset="10" />
+    </svg>
+  );
+}
 
 function ExerciseCard({ name, data }) {
   const { sessions, stalled, predictedPR, deloadSuggested, overallMax } = data;
@@ -228,23 +250,50 @@ function FatigueRadar({ fatigue }) {
 export default function App() {
   const [rows, setRows] = useState(null);
   const [filter, setFilter] = useState("");
-  const [dragging, setDragging] = useState(false);
   const [activeTab, setTab] = useState("progression");
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem("hevy_api_key") || "");
+  const [keyInput, setKeyInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [lastSync, setLastSync] = useState(() => localStorage.getItem("hevy_last_sync") || "");
 
-  const handleFile = useCallback((file) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const parsed = parseCSV(e.target.result);
-      setRows(normalizeRows(parsed));
-    };
-    reader.readAsText(file);
+  const loadData = useCallback(async (key) => {
+    setLoading(true);
+    setError("");
+    try {
+      const workouts = await fetchAllWorkouts(key);
+      setRows(workoutsToRows(workouts));
+      const now = new Date().toLocaleString();
+      setLastSync(now);
+      localStorage.setItem("hevy_last_sync", now);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const onDrop = useCallback((e) => {
-    e.preventDefault(); setDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
-  }, [handleFile]);
+  // Auto-load on startup if key is saved
+  useEffect(() => {
+    if (apiKey) loadData(apiKey);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleConnect = async () => {
+    const key = keyInput.trim();
+    if (!key) return;
+    setApiKey(key);
+    localStorage.setItem("hevy_api_key", key);
+    setKeyInput("");
+    await loadData(key);
+  };
+
+  const handleDisconnect = () => {
+    localStorage.removeItem("hevy_api_key");
+    localStorage.removeItem("hevy_last_sync");
+    setApiKey("");
+    setRows(null);
+    setLastSync("");
+  };
 
   const exerciseData = useMemo(() => {
     if (!rows) return {};
@@ -276,40 +325,96 @@ export default function App() {
         @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&display=swap');
         * { box-sizing: border-box; margin: 0; }
         ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: #12121a; } ::-webkit-scrollbar-thumb { background: #2a2a3d; border-radius: 3px; }
+        button:hover { opacity: 0.85; }
       `}</style>
 
       <div style={{ maxWidth: 900, margin: "0 auto", padding: "32px 20px" }}>
 
         {/* header */}
-        <div style={{ marginBottom: 32 }}>
-          <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 32, fontWeight: 800, background: `linear-gradient(135deg, ${COLORS.accent}, ${COLORS.accent2})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-            HEVY ANALYTICS
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 32, flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 32, fontWeight: 800, background: `linear-gradient(135deg, ${COLORS.accent}, ${COLORS.accent2})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+              HEVY ANALYTICS
+            </div>
+            <div style={{ color: COLORS.muted, marginTop: 4, fontSize: 14 }}>Progression intelligence · Fatigue tracking · Deload detection</div>
           </div>
-          <div style={{ color: COLORS.muted, marginTop: 4, fontSize: 14 }}>Progression intelligence · Fatigue tracking · Deload detection</div>
+          {apiKey && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {lastSync && <span style={{ color: COLORS.muted, fontSize: 12 }}>Synced {lastSync}</span>}
+              <button onClick={() => loadData(apiKey)} disabled={loading} style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "8px 14px", borderRadius: 8, border: `1px solid ${COLORS.accent}44`,
+                background: COLORS.accent + "18", color: COLORS.accent, cursor: "pointer", fontSize: 13, fontWeight: 600
+              }}>
+                {loading ? <Spinner /> : "↻"} Refresh
+              </button>
+              <button onClick={handleDisconnect} style={{
+                padding: "8px 14px", borderRadius: 8, border: `1px solid ${COLORS.border}`,
+                background: "transparent", color: COLORS.muted, cursor: "pointer", fontSize: 13
+              }}>Disconnect</button>
+            </div>
+          )}
         </div>
 
-        {/* upload */}
-        {!rows ? (
-          <div
-            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={onDrop}
-            style={{
-              border: `2px dashed ${dragging ? COLORS.accent : COLORS.border}`,
-              borderRadius: 16, padding: 60, textAlign: "center",
-              background: dragging ? COLORS.accent + "08" : COLORS.surface,
-              transition: "all 0.2s", cursor: "pointer"
-            }}
-            onClick={() => document.getElementById("csv-input").click()}
-          >
-            <div style={{ fontSize: 40, marginBottom: 16 }}>📂</div>
-            <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 18, marginBottom: 8, color: COLORS.text }}>Drop your Hevy CSV export</div>
-            <div style={{ color: COLORS.muted, fontSize: 14 }}>or click to browse · Export from Hevy → Profile → Settings → Export</div>
-            <input id="csv-input" type="file" accept=".csv" style={{ display: "none" }} onChange={e => { if (e.target.files[0]) handleFile(e.target.files[0]); }} />
+        {/* connect screen */}
+        {!apiKey && (
+          <Card style={{ maxWidth: 480, margin: "0 auto", padding: 32, textAlign: "center" }}>
+            <div style={{ fontSize: 36, marginBottom: 16 }}>🏋️</div>
+            <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 20, color: COLORS.text, marginBottom: 8 }}>Connect your Hevy account</div>
+            <div style={{ color: COLORS.muted, fontSize: 14, marginBottom: 24, lineHeight: 1.8 }}>
+              <span style={{ color: COLORS.text, fontWeight: 600 }}>How to get your API key:</span><br />
+              1. Open the <span style={{ color: COLORS.accent }}>Hevy app</span> on your phone<br />
+              2. Go to <span style={{ color: COLORS.accent }}>Profile → Settings → Developer</span><br />
+              3. Copy your API key and paste it below<br />
+              <span style={{ fontSize: 12 }}>Requires a Hevy Pro subscription.</span>
+            </div>
+            <input
+              type="text"
+              placeholder="Paste your API key..."
+              value={keyInput}
+              onChange={e => setKeyInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleConnect()}
+              style={{
+                width: "100%", padding: "11px 14px", marginBottom: 12,
+                background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8,
+                color: COLORS.text, fontSize: 14, outline: "none", fontFamily: "'DM Sans', sans-serif"
+              }}
+            />
+            {error && <div style={{ color: COLORS.warn, fontSize: 13, marginBottom: 12 }}>{error}</div>}
+            <button onClick={handleConnect} disabled={loading || !keyInput.trim()} style={{
+              width: "100%", padding: "11px 0", borderRadius: 8, border: "none",
+              background: `linear-gradient(135deg, ${COLORS.accent}, ${COLORS.accent2})`,
+              color: COLORS.bg, fontWeight: 700, fontSize: 15, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              opacity: loading || !keyInput.trim() ? 0.6 : 1
+            }}>
+              {loading ? <><Spinner /> Loading...</> : "Connect & Sync"}
+            </button>
+          </Card>
+        )}
+
+        {/* loading state (auto-load) */}
+        {apiKey && loading && !rows && (
+          <div style={{ textAlign: "center", padding: 80, color: COLORS.muted }}>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}><Spinner /></div>
+            Fetching your workouts...
           </div>
-        ) : (
+        )}
+
+        {/* error state */}
+        {apiKey && error && !rows && (
+          <Card style={{ textAlign: "center", padding: 40 }}>
+            <div style={{ color: COLORS.warn, marginBottom: 12 }}>{error}</div>
+            <button onClick={handleDisconnect} style={{
+              padding: "8px 20px", borderRadius: 8, border: `1px solid ${COLORS.border}`,
+              background: "transparent", color: COLORS.muted, cursor: "pointer"
+            }}>Try a different key</button>
+          </Card>
+        )}
+
+        {/* dashboard */}
+        {rows && (
           <>
-            {/* stats bar */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
               {[
                 { label: "Exercises tracked", value: Object.keys(exerciseData).length, color: COLORS.accent },
@@ -324,20 +429,16 @@ export default function App() {
               ))}
             </div>
 
-            {/* tabs */}
             <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
               {[["progression", "Progression"], ["fatigue", "Body Part Fatigue"]].map(([id, label]) => (
                 <button key={id} onClick={() => setTab(id)} style={{
-                  padding: "8px 20px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 600, fontSize: 14,
+                  padding: "8px 20px", borderRadius: 8, border: "none", cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif", fontWeight: 600, fontSize: 14,
                   background: activeTab === id ? COLORS.accent : COLORS.card,
                   color: activeTab === id ? COLORS.bg : COLORS.muted,
                   transition: "all 0.15s"
                 }}>{label}</button>
               ))}
-              <button onClick={() => setRows(null)} style={{
-                marginLeft: "auto", padding: "8px 16px", borderRadius: 8, border: `1px solid ${COLORS.border}`,
-                background: "transparent", color: COLORS.muted, cursor: "pointer", fontSize: 13
-              }}>← New file</button>
             </div>
 
             {activeTab === "progression" && (
@@ -352,7 +453,13 @@ export default function App() {
                     color: COLORS.text, fontSize: 14, outline: "none", fontFamily: "'DM Sans', sans-serif"
                   }}
                 />
-                {filtered.length === 0 && <div style={{ color: COLORS.muted, textAlign: "center", padding: 40 }}>No exercises found</div>}
+                {filtered.length === 0 && (
+                  <div style={{ color: COLORS.muted, textAlign: "center", padding: 40 }}>
+                    {Object.keys(exerciseData).length === 0
+                      ? "Not enough data yet — exercises need 3+ sessions to show progression charts."
+                      : "No exercises found"}
+                  </div>
+                )}
                 {filtered.sort(([, a], [, b]) => (b.stalled ? 1 : 0) - (a.stalled ? 1 : 0))
                   .map(([name, data]) => <ExerciseCard key={name} name={name} data={data} />)}
               </>
