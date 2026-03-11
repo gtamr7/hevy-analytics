@@ -4,6 +4,6 @@
     "buildCommand": "npm install && npm run build"
   },
   "deploy": {
-    "startCommand": "node_modules/.bin/serve -s build -l $PORT"
+    "startCommand": "npm run serve"
   }
 }
