@@ -175,7 +175,7 @@ function HelpTooltip({ text }) {
       >?</span>
       {show && (
         <span style={{
-          position: "absolute", bottom: "calc(100% + 8px)", left: "50%", transform: "translateX(-50%)",
+          position: "absolute", bottom: "calc(100% + 8px)", right: 0,
           background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8,
           padding: "10px 14px", fontSize: 12, color: COLORS.text, lineHeight: 1.7,
           width: 280, zIndex: 100, boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
