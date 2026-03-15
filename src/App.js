@@ -16,6 +16,9 @@ const MUSCLE_MAP = {
   "overhead press": "Shoulders", "shoulder press": "Shoulders", "lateral raise": "Shoulders",
   "front raise": "Shoulders", "face pull": "Shoulders",
   "barbell curl": "Biceps", "dumbbell curl": "Biceps", "hammer curl": "Biceps", "cable curl": "Biceps",
+  "bicep curl": "Biceps", "biceps curl": "Biceps", "ez bar curl": "Biceps", "ez-bar curl": "Biceps",
+  "preacher curl": "Biceps", "concentration curl": "Biceps", "spider curl": "Biceps",
+  "incline curl": "Biceps", "curl": "Biceps",
   "tricep": "Triceps", "triceps": "Triceps", "skull crusher": "Triceps", "close grip bench": "Triceps", "dip": "Triceps",
   "pushdown": "Triceps",
   "calf raise": "Calves", "standing calf": "Calves",
@@ -154,6 +157,38 @@ const Card = ({ children, style = {} }) => (
     borderRadius: 12, padding: 20, ...style
   }}>{children}</div>
 );
+
+function HelpTooltip({ text }) {
+  const [show, setShow] = useState(false);
+  return (
+    <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+      <span
+        onMouseEnter={() => setShow(true)}
+        onMouseLeave={() => setShow(false)}
+        onClick={() => setShow(s => !s)}
+        style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          width: 18, height: 18, borderRadius: "50%",
+          border: `1px solid ${COLORS.muted}`, color: COLORS.muted,
+          fontSize: 11, fontWeight: 700, cursor: "pointer", userSelect: "none", flexShrink: 0,
+        }}
+      >?</span>
+      {show && (
+        <span style={{
+          position: "absolute", bottom: "calc(100% + 8px)", left: "50%", transform: "translateX(-50%)",
+          background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8,
+          padding: "10px 14px", fontSize: 12, color: COLORS.text, lineHeight: 1.7,
+          width: 280, zIndex: 100, boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+          whiteSpace: "normal", pointerEvents: "none",
+        }}>
+          {typeof text === "string"
+            ? text.split("\n\n").map((p, i) => <span key={i} style={{ display: "block", marginBottom: i < text.split("\n\n").length - 1 ? 8 : 0 }}>{p}</span>)
+            : text}
+        </span>
+      )}
+    </span>
+  );
+}
 
 function Spinner() {
   return (
@@ -443,16 +478,21 @@ export default function App() {
 
             {activeTab === "progression" && (
               <>
-                <input
-                  placeholder="Filter exercises..."
-                  value={filter}
-                  onChange={e => setFilter(e.target.value)}
-                  style={{
-                    width: "100%", padding: "10px 16px", marginBottom: 20,
-                    background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8,
-                    color: COLORS.text, fontSize: 14, outline: "none", fontFamily: "'DM Sans', sans-serif"
-                  }}
-                />
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+                  <input
+                    placeholder="Filter exercises..."
+                    value={filter}
+                    onChange={e => setFilter(e.target.value)}
+                    style={{
+                      flex: 1, padding: "10px 16px",
+                      background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8,
+                      color: COLORS.text, fontSize: 14, outline: "none", fontFamily: "'DM Sans', sans-serif"
+                    }}
+                  />
+                  <HelpTooltip text={
+                    "📈 e1RM (Estimated 1-Rep Max): how much you could theoretically lift for 1 rep, calculated from your working sets using weight × (1 + reps ÷ 30). It's the standard way to compare strength across different rep ranges.\n\n🟠 STALLED: your recent best e1RM hasn't beaten your all-time PR.\n\n🩷 DELOAD: you're stalled and volume has been high — try reducing weight 10–15% for a week to recover and break through.\n\nCharts show your last 12 sessions per exercise. Only exercises with 3+ sessions are shown."
+                  } />
+                </div>
                 {filtered.length === 0 && (
                   <div style={{ color: COLORS.muted, textAlign: "center", padding: 40 }}>
                     {Object.keys(exerciseData).length === 0
