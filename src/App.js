@@ -514,9 +514,8 @@ export default function App() {
             <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 20, color: COLORS.text, marginBottom: 8 }}>Connect your Hevy account</div>
             <div style={{ color: COLORS.muted, fontSize: 14, marginBottom: 24, lineHeight: 1.8 }}>
               <span style={{ color: COLORS.text, fontWeight: 600 }}>How to get your API key:</span><br />
-              1. Open the <span style={{ color: COLORS.accent }}>Hevy app</span> on your phone<br />
-              2. Go to <span style={{ color: COLORS.accent }}>Profile → Settings → Developer</span><br />
-              3. Copy your API key and paste it below<br />
+              1. Go to <a href="https://hevy.com/settings?developer" target="_blank" rel="noreferrer" style={{ color: COLORS.accent }}>hevy.com/settings?developer</a><br />
+              2. Copy your API key and paste it below<br />
               <span style={{ fontSize: 12 }}>Requires a Hevy Pro subscription.</span>
             </div>
             <input
